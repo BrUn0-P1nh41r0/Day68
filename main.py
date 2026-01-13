@@ -1,16 +1,101 @@
-# This is a sample Python script.
+from flask import Flask, render_template, request, url_for, redirect, flash, send_from_directory
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Integer, String
+from flask_login import UserMixin, login_user, LoginManager, login_required, current_user, logout_user
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret-key-goes-here'
+
+# CREATE DATABASE
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+class Base(DeclarativeBase):
+    pass
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+db = SQLAlchemy(model_class=Base)
+db.init_app(app)
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+# CREATE TABLE IN DB
+
+
+class User(db.Model):
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(100), unique=True)
+    password: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(1000))
+
+
+with app.app_context():
+    db.create_all()
+
+class RegisterUser:
+    def __init__(self, db_session):
+        self.db_session = db_session
+
+    def register_user(self, email: str, password: str, name: str) -> User:
+        email = (email or "").strip().lower()
+        name = (name or "").strip()
+        password = password or ""
+
+        existing = self.db_session.query(User).filter_by(email=email).first()
+        if existing:
+            raise ValueError("This email is already registered")
+
+        hashed = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+
+        user = User(email=email, name=name, password=hashed)
+        self.db_session.add(user)
+        self.db_session.commit()
+        return user
+
+@app.route('/')
+def home():
+    return render_template("index.html")
+
+
+@app.route('/register', methods=['GET','POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        name = request.form.get('name')
+
+        service = RegisterUser(db.session)
+
+        try:
+            user = service.register_user(email=email, password=password, name=name)
+            #login_user(user)
+            return redirect(url_for('secrets'))
+        except ValueError as e:
+            flash(str(e))
+            return redirect(url_for('register'))
+
+    return render_template("register.html")
+
+
+@app.route('/login')
+def login():
+    return render_template("login.html")
+
+
+@app.route('/secrets')
+def secrets():
+    return render_template("secrets.html")
+
+
+@app.route('/logout')
+def logout():
+    pass
+
+
+@app.route('/download')
+def download():
+    pass
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
