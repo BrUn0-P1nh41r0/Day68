@@ -1,3 +1,4 @@
+import flask_login
 from flask import Flask, render_template, request, url_for, redirect, flash, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
@@ -19,18 +20,29 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
+#CONFIGURE FLASK-LOGIN
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login" #endpoint da rota /login
+
 # CREATE TABLE IN DB
 
 
-class User(db.Model):
+class User(UserMixin, db.Model):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(100), unique=True)
-    password: Mapped[str] = mapped_column(String(100))
+    password: Mapped[str] = mapped_column(String(200))
     name: Mapped[str] = mapped_column(String(1000))
-
 
 with app.app_context():
     db.create_all()
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return db.session.get(User, int(user_id))
+    except ValueError:
+        return None
 
 class RegisterUser:
     def __init__(self, db_session):
@@ -68,7 +80,7 @@ def register():
 
         try:
             user = service.register_user(email=email, password=password, name=name)
-            #login_user(user)
+            login_user(user)
             return redirect(url_for('secrets'))
         except ValueError as e:
             flash(str(e))
@@ -77,24 +89,45 @@ def register():
     return render_template("register.html")
 
 
-@app.route('/login')
+@app.route('/login', methods=['GET','POST'])
 def login():
+    if request.method == 'POST':
+        email = (request.form.get('email') or "").strip().lower()
+        password = request.form.get('password') or ""
+
+        user = db.session.query(User).filter_by(email=email).first()
+        if not user:
+            flash("Invalid username or password")
+            return redirect(url_for('login'))
+        if not check_password_hash(user.password, password):
+            flash("Invalid username or password")
+            return redirect(url_for('login'))
+
+        login_user(user)
+        next_url = request.args.get('next')
+        return redirect(next_url or url_for('secrets'))
+
     return render_template("login.html")
 
 
 @app.route('/secrets')
+@login_required # <- protegido
 def secrets():
     return render_template("secrets.html")
 
 
 @app.route('/logout')
+@login_required
 def logout():
-    pass
-
+    logout_user()
+    return redirect(url_for('home'))
 
 @app.route('/download')
+@login_required
 def download():
-    return send_from_directory('static', 'files/cheat_sheet.pdf')
+    return send_from_directory(
+        directory='static',
+        path='files/cheat_sheet.pdf')
 
 
 if __name__ == "__main__":
